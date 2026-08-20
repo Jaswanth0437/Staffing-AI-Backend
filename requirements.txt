@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+psycopg2-binary
+python-dotenv
+pydantic-settings
+requests
+simple-salesforce
