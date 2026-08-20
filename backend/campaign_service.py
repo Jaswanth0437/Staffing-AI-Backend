@@ -2,16 +2,22 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from backend.activity import log_activity
-from backend.apify_client import map_dice_job, map_linkedin_job, search_dice_jobs, search_linkedin_jobs
+from backend.apify_client import map_linkedin_job, search_linkedin_jobs
 from backend.database import engine
 from backend.job_filters import filter_mapped_jobs
 from backend.models import Campaign, Job, utcnow
 from backend.qualification import qualify_job
 
 # One entry per source actor: (source label, search fn, mapper fn).
+#
+# LinkedIn only for now: Dice doesn't respect the `location` search criteria
+# at all (it ignores it and returns generic US-based remote postings
+# regardless of what was asked for, e.g. a "India" search coming back with
+# only Tampa/NJ/Minnesota/LA jobs) — worse than not having a second source.
+# Re-add Dice here (and to the JOB_SOURCES-shaped import above) once/if that
+# actor's location handling is sorted out.
 JOB_SOURCES = [
     ("linkedin", search_linkedin_jobs, map_linkedin_job),
-    ("dice", search_dice_jobs, map_dice_job),
 ]
 
 

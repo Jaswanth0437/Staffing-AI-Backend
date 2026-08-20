@@ -33,9 +33,13 @@ class JobOut(BaseModel):
     company_employee_size: Optional[int] = None
     source: Optional[str] = None
     work_mode_signal: Optional[str] = None
+    url: Optional[str] = None  # original LinkedIn/Dice posting URL, pulled from raw_data
     created_at: datetime
     qualification_status: str  # pending | qualified | rejected
     reason: Optional[str] = None
+    rule_flags: Optional[dict] = None  # per-criterion passed/failed/skipped_no_data breakdown
+    decided_by: Optional[str] = None  # ai | manual — None if not qualified yet
+    lead_id: Optional[int] = None  # set once a lead has been created from this job
 
 
 class ManualQualify(BaseModel):
@@ -112,3 +116,11 @@ class EmployeeMatchOut(BaseModel):
 class MatchEmployeesResponse(BaseModel):
     employee_matches: list[EmployeeMatchOut]
     reason: Optional[str] = None  # e.g. "no_qualifying_employees" when employee_matches is empty
+
+
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    skills: Optional[list[str]] = None
+    experience_summary: Optional[str] = None
+    seniority: Optional[str] = None

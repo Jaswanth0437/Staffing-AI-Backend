@@ -32,7 +32,8 @@ DEMO_USER = "demo@winfomi.com"
 # must treat a null value as "unknown" and skip that specific check rather than reject
 # the job outright — a missing field is not the same as a value that fails the threshold.
 EMPLOYEE_SIZE_FLOOR = 10  # reject jobs at companies smaller than this (skipped if company_employee_size is null)
-APPLICANT_COUNT_CEILING = 200  # reject jobs with more applicants than this (skipped if applicant_count is null)
+EMPLOYEE_SIZE_CEILING = 5000  # reject jobs at companies larger than this ("no MNC"); skipped if company_employee_size is null
+APPLICANT_COUNT_CEILING = 100  # reject jobs with more applicants than this (skipped if applicant_count is null)
 STAFFING_AGENCY_KEYWORDS = ["staffing", "recruiting", "recruitment", "talent solutions", "agency"]
 
 # Caps results per Apify actor call (applied as maxRecords/maxResults in the actor
@@ -70,6 +71,11 @@ WORK_MODE_KEYWORDS = {
 COMPANY_NAME = "Winfomi Technologies"
 COMPANY_SERVICES = ["staff augmentation", "contract-to-hire", "dedicated engineering teams"]
 COMPANY_PITCH_TONE = "concise, consultative, no hard-sell"
+
+# Internal notification recipient — gets a copy of every lead outreach email
+# plus the employee match details behind it (unlike the lead-facing email,
+# this one is allowed to name the actual matched employee).
+CEO_NOTIFICATION_EMAIL = "jashwanth.m@winfomi.com"
 
 # --- Employee matching (M3) ---
 TOP_N_EMPLOYEE_MATCHES = 5
