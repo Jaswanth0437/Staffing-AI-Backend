@@ -13,6 +13,11 @@ from backend.schemas import ConfirmEmployee, EmailOut, EmployeeMatchOut, LeadOut
 router = APIRouter(prefix="/leads", tags=["leads"])
 
 
+@router.get("", response_model=List[LeadOut])
+def list_leads(session: Session = Depends(get_session)):
+    return session.exec(select(Lead)).all()
+
+
 @router.get("/{lead_id}", response_model=LeadOut)
 def get_lead(lead_id: int, session: Session = Depends(get_session)):
     lead = session.get(Lead, lead_id)
@@ -77,6 +82,16 @@ def match_employees(lead_id: int, session: Session = Depends(get_session)):
         session.add(match)
         created.append(match)
     session.commit()
+
+    # Auto-confirm the top-scoring match so email generation is immediately
+    # available without a separate manual confirm step — the UI now just
+    # surfaces whether a match was found, not a per-candidate approval flow.
+    if created:
+        top_match = max(created, key=lambda m: m.match_score)
+        top_match.confirmed = True
+        session.add(top_match)
+        session.commit()
+
     for m in created:
         session.refresh(m)
 

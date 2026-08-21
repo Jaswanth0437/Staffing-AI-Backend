@@ -68,6 +68,7 @@ source that provides it gets added.
 """
 
 import hashlib
+import html
 import json
 import re
 from datetime import datetime
@@ -78,6 +79,60 @@ import requests
 from backend.config import MAX_JOBS_PER_CAMPAIGN, MAX_JOBS_PER_CAMPAIGN_WITH_COMPANY_FILTER, settings
 
 APIFY_RUN_SYNC_URL = "https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items"
+
+_BLOCK_BREAK_RE = re.compile(r"</p>|</li>|<br\s*/?>", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_BLANK_LINES_RE = re.compile(r"\n{3,}")
+
+
+def clean_html_description(raw: Optional[str]) -> Optional[str]:
+    """LinkedIn's `description` field is inconsistently HTML-escaped —
+    some jobs come through as plain text, others as real HTML, and some as
+    HTML that's itself been entity-escaped (literal "&lt;p&gt;" text, one
+    job even doubly so: "&amp;amp;"). Unescape to a fixed point, turn block
+    breaks into newlines before stripping tags (so paragraphs don't get
+    globbed into one wall of text), then unescape once more for entities
+    that were only revealed after unwrapping tags."""
+    if not raw:
+        return raw
+    text = raw
+    for _ in range(3):
+        unescaped = html.unescape(text)
+        if unescaped == text:
+            break
+        text = unescaped
+    text = _BLOCK_BREAK_RE.sub("\n", text)
+    text = _TAG_RE.sub("", text)
+    text = html.unescape(text)
+    text = _BLANK_LINES_RE.sub("\n\n", text)
+    return text.strip()
+
+
+# The actor validates this strictly server-side (400s on anything else) —
+# our own employment_type tokens (full_time/part_time/...) are NOT valid
+# values here. An unrecognized/unmapped value is dropped from the request
+# entirely rather than passed through, since passing it raw used to make the
+# whole LinkedIn call fail outright (previously masked by Dice still
+# returning results even when LinkedIn 400'd on this field).
+_LINKEDIN_EMPLOYMENT_TYPE_MAP = {
+    "full_time": "F",
+    "part_time": "P",
+    "contract": "C",
+    "temporary": "T",
+    "internship": "I",
+}
+
+# Also strictly validated server-side ("1".."6" only) despite this actor's
+# docs not spelling out the enum. Frontend sends the display string, which
+# maps 1:1 onto these codes in order.
+_LINKEDIN_EXPERIENCE_LEVEL_MAP = {
+    "internship": "1",
+    "entry level": "2",
+    "associate": "3",
+    "mid-senior level": "4",
+    "director": "5",
+    "executive": "6",
+}
 
 _DICE_POSTED_DATE_MAP = {
     "any": "all",
@@ -151,10 +206,12 @@ def build_linkedin_input(search_criteria: dict) -> dict:
         "location": search_criteria.get("location") or "",
         "maxRecords": max_records,
     }
-    if search_criteria.get("employment_type"):
-        actor_input["employmentTypes"] = [search_criteria["employment_type"]]
-    if search_criteria.get("experience_level"):
-        actor_input["experienceLevel"] = search_criteria["experience_level"]
+    employment_code = _LINKEDIN_EMPLOYMENT_TYPE_MAP.get(search_criteria.get("employment_type") or "")
+    if employment_code:
+        actor_input["employmentTypes"] = [employment_code]
+    experience_code = _LINKEDIN_EXPERIENCE_LEVEL_MAP.get((search_criteria.get("experience_level") or "").strip().lower())
+    if experience_code:
+        actor_input["experienceLevel"] = experience_code
     date_posted = _linkedin_date_posted(search_criteria.get("posting_timeframe"))
     if date_posted:
         actor_input["datePosted"] = date_posted
@@ -182,12 +239,19 @@ def map_linkedin_job(raw_job: dict) -> dict[str, Any]:
         "title": raw_job.get("shortTitle") or raw_job.get("title"),
         "company": company_name,
         "location": location_str,
-        "description": raw_job.get("description"),
+        "description": clean_html_description(raw_job.get("description")),
         "posted_date": _parse_iso_datetime(raw_job.get("datePosted")),
         "applicant_count": raw_job.get("applicants"),
         "company_employee_size": None,  # not provided by this actor
         "source": "linkedin",
         "work_mode_signal": None,  # this actor's output has no remote/onsite/hybrid field
+        # The `employmentTypes` INPUT filter (build_linkedin_input, above) is
+        # not reliably honored by the actor — live testing returned mostly
+        # FULL_TIME jobs even when requesting ["C"] contract-only. This is
+        # the actor's OUTPUT field instead (values seen: "FULL_TIME",
+        # "Contract", "Full-time" — inconsistent casing/format), which is
+        # accurate per-job and is what job_filters.py actually filters on.
+        "employment_type_signal": raw_job.get("employmentType"),
         "raw_data": raw_job,
     }
 

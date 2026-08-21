@@ -27,7 +27,12 @@ from sqlmodel import Session
 
 from backend.activity import log_activity
 from backend.ai_service import AIServiceError, generate_text
-from backend.config import APPLICANT_COUNT_CEILING, EMPLOYEE_SIZE_FLOOR, STAFFING_AGENCY_KEYWORDS
+from backend.config import (
+    APPLICANT_COUNT_CEILING,
+    EMPLOYEE_SIZE_CEILING,
+    EMPLOYEE_SIZE_FLOOR,
+    STAFFING_AGENCY_KEYWORDS,
+)
 from backend.models import Job, Qualification
 
 
@@ -48,8 +53,22 @@ def check_rules(job: Job) -> tuple[Optional[str], dict]:
                 rule_flags,
             )
         rule_flags["employee_size_floor"] = "passed"
+
+        if job.company_employee_size > EMPLOYEE_SIZE_CEILING:
+            rule_flags["employee_size_ceiling"] = "failed"
+            return (
+                f"Company employee size ({job.company_employee_size}) exceeds the MNC ceiling of {EMPLOYEE_SIZE_CEILING}",
+                rule_flags,
+            )
+        rule_flags["employee_size_ceiling"] = "passed"
     else:
+        # Neither Apify actor currently provides company_employee_size, so
+        # both size rules are a no-op until a source that does gets added —
+        # see apify_client.py's NET RESULT note. The AI prompt below carries
+        # the practical "no MNC" / "prefer IT companies" judgment in the
+        # meantime, since it can read signals from the job text itself.
         rule_flags["employee_size_floor"] = "skipped_no_data"
+        rule_flags["employee_size_ceiling"] = "skipped_no_data"
 
     if job.applicant_count is not None:
         if job.applicant_count > APPLICANT_COUNT_CEILING:
@@ -80,6 +99,16 @@ def _build_prompt(job: Job) -> str:
         "a specific role to fill, not a mass-posted template, not obviously an internal-only "
         "role, not something already fully owned by an in-house recruiting pipeline that would "
         "reject external staffing vendors.\n\n"
+        "Neither the applicant count nor the company's employee headcount is reliably available "
+        "from the job data, so also use your own judgment from the job text itself on these two "
+        "points:\n"
+        "- Reject postings that read as coming from a large multinational corporation (e.g. "
+        "explicit mentions of being a Fortune 500 / global enterprise / thousands of employees / "
+        "dozens of worldwide offices) — those typically run hiring through in-house pipelines, "
+        "not external staffing vendors.\n"
+        "- Prefer postings from IT / software / technology services companies over unrelated "
+        "industries — this is a soft preference, not an automatic rejection of non-IT roles, but "
+        "it should tip a genuinely borderline case toward rejection.\n\n"
         f"Title: {job.title or 'unknown'}\n"
         f"Company: {job.company or 'unknown'}\n"
         f"Location: {job.location or 'unknown'}\n"
