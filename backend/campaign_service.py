@@ -1,5 +1,5 @@
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend.activity import log_activity
 from backend.apify_client import map_linkedin_job, search_linkedin_jobs
@@ -22,7 +22,7 @@ JOB_SOURCES = [
 
 
 def run_campaign_search(campaign_id: int) -> None:
-    """BackgroundTask entry point: pending -> running -> completed|failed.
+    """BackgroundTask entry point: pending|completed -> running -> completed|failed.
 
     Runs in its own DB session since the request-scoped session from the
     endpoint that scheduled this task is already closed by the time it runs.
@@ -30,6 +30,14 @@ def run_campaign_search(campaign_id: int) -> None:
     table (tagged via `source`). The campaign only fails outright if EVERY
     source errors out — if one source fails but another succeeds, we keep the
     jobs we got and log the partial failure instead of discarding good data.
+
+    Doubles as the recheck entry point (POST /campaigns/{id}/recheck calls
+    this on an already-`completed` campaign) — the (campaign_id,
+    external_job_id) unique constraint means a job already on file is simply
+    skipped (see the IntegrityError catch below), so only genuinely new
+    postings get inserted. Newly-inserted jobs are flagged `is_new=True`; any
+    `is_new` flag left over from an earlier run is cleared first so only the
+    latest batch is ever marked.
     """
     with Session(engine) as session:
         campaign = session.get(Campaign, campaign_id)
@@ -38,6 +46,12 @@ def run_campaign_search(campaign_id: int) -> None:
 
         campaign.status = "running"
         session.add(campaign)
+        session.commit()
+
+        stale_new_jobs = session.exec(select(Job).where(Job.campaign_id == campaign_id, Job.is_new == True)).all()  # noqa: E712
+        for stale_job in stale_new_jobs:
+            stale_job.is_new = False
+            session.add(stale_job)
         session.commit()
 
         all_raw_jobs: list[tuple[str, dict]] = []
@@ -70,12 +84,13 @@ def run_campaign_search(campaign_id: int) -> None:
 
         inserted = 0
         for job_data in kept_jobs:
-            job = Job(campaign_id=campaign_id, **job_data)
+            job = Job(campaign_id=campaign_id, is_new=True, **job_data)
             session.add(job)
             try:
                 session.commit()
             except IntegrityError:
-                # Duplicate (campaign_id, external_job_id) — dedup is M7's job; skip for now.
+                # Duplicate (campaign_id, external_job_id) — already on file
+                # from an earlier run (initial search or a prior recheck).
                 session.rollback()
                 continue
             session.refresh(job)

@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from backend.models import Campaign
+
 
 class SearchCriteria(BaseModel):
     job_role: Optional[str] = None
@@ -20,6 +22,13 @@ class CampaignCreate(BaseModel):
     search_criteria: SearchCriteria
 
 
+class CampaignCreateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
+
+    campaign: Campaign
+    is_duplicate: bool = False  # True if `campaign` is a pre-existing match, not a new row
+
+
 class JobOut(BaseModel):
     id: int
     campaign_id: int
@@ -35,6 +44,7 @@ class JobOut(BaseModel):
     work_mode_signal: Optional[str] = None
     url: Optional[str] = None  # original LinkedIn/Dice posting URL, pulled from raw_data
     created_at: datetime
+    is_new: bool = False  # set on jobs inserted by the most recent recheck run
     qualification_status: str  # pending | qualified | rejected
     reason: Optional[str] = None
     rule_flags: Optional[dict] = None  # per-criterion passed/failed/skipped_no_data breakdown

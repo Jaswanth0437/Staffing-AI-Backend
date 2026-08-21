@@ -121,6 +121,7 @@ def send_email_endpoint(email_id: int, session: Session = Depends(get_session)):
             recipient=email.recipient,
             subject=email.subject,
             body=email.body,
+            include_signature_image=True,
         )
     except GraphEmailError as exc:
         email.status = "failed"

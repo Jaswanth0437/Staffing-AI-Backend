@@ -42,6 +42,11 @@ class Job(SQLModel, table=True):
     work_mode_signal: Optional[str] = None
     raw_data: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
+    # True only for jobs inserted by the most recent recheck run — cleared
+    # (on every other job in the campaign) at the start of each new run, so
+    # only the latest batch is ever flagged. Lets the UI show a "New" tag and
+    # sort the latest finds to the top without needing to compare timestamps.
+    is_new: bool = Field(default=False)
 
 
 class Qualification(SQLModel, table=True):
