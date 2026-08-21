@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     AZURE_TENANT_ID: str = ""
     GRAPH_SENDER_EMAIL: str = ""
 
+    # Comma-separated list of exact origins the browser is allowed to call
+    # this API from directly (CORS). Add a deployed frontend's origin here
+    # (or override via the ALLOWED_ORIGINS env var) — Vercel preview-deploy
+    # subdomains are covered separately by ALLOWED_ORIGIN_REGEX in main.py,
+    # not by this list.
+    ALLOWED_ORIGINS: str = "http://localhost:3000,https://staffing-ai-frontend.vercel.app"
+
 
 settings = Settings()
 
