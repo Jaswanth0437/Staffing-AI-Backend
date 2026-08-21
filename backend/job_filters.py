@@ -55,25 +55,31 @@ def _normalize_employment_type(value: str | None) -> str:
     return _EMPLOYMENT_TYPE_SIGNAL_ALIASES.get(normalized, normalized)
 
 
-def filter_mapped_jobs(mapped_jobs: list[dict], search_criteria: dict) -> tuple[list[dict], list[tuple[dict, str]]]:
-    """Returns (kept, dropped). `dropped` is a list of (job_dict, reason) pairs
-    for logging/inspection — the job dicts are the same shape produced by the
+def filter_mapped_jobs(
+    mapped_jobs: list[dict], search_criteria: dict
+) -> tuple[list[dict], list[tuple[dict, list[tuple[str, str]]]]]:
+    """Returns (kept, dropped). `dropped` is a list of (job_dict, reasons)
+    pairs for logging/inspection and for campaign_service.py's per-category
+    run summary — the job dicts are the same shape produced by the
     apify_client mapper functions (title, company, description, location,
-    work_mode_signal, ...)."""
+    work_mode_signal, ...). Each reason is (category, message); category is
+    always one of "company" / "employment_type" / "work_mode" — the three
+    criteria this function actually checks — so callers can aggregate
+    without parsing the free-text message."""
     company_filter = (search_criteria.get("company") or "").strip().lower()
     employment_type = search_criteria.get("employment_type") or ""
     work_mode = search_criteria.get("work_mode") or ""
 
     kept: list[dict] = []
-    dropped: list[tuple[dict, str]] = []
+    dropped: list[tuple[dict, list[tuple[str, str]]]] = []
 
     for job in mapped_jobs:
-        reasons = []
+        reasons: list[tuple[str, str]] = []
 
         if company_filter:
             company_value = (job.get("company") or "").lower()
             if company_filter not in company_value:
-                reasons.append(f"company {job.get('company')!r} does not contain {search_criteria['company']!r}")
+                reasons.append(("company", f"company {job.get('company')!r} does not contain {search_criteria['company']!r}"))
 
         if employment_type:
             # LinkedIn's `employmentType` OUTPUT field (job.employment_type_signal)
@@ -87,12 +93,18 @@ def filter_mapped_jobs(mapped_jobs: list[dict], search_criteria: dict) -> tuple[
             if signal:
                 normalized_requested = _normalize_employment_type(employment_type)
                 if signal != normalized_requested:
-                    reasons.append(f"employment_type_signal {signal!r} does not match requested {employment_type!r}")
+                    reasons.append((
+                        "employment_type",
+                        f"employment_type_signal {signal!r} does not match requested {employment_type!r}",
+                    ))
             else:
                 keywords = _keywords_for(employment_type, EMPLOYMENT_TYPE_KEYWORDS)
                 text = f"{job.get('title') or ''} {job.get('description') or ''}"
                 if not _matches_any(text, keywords):
-                    reasons.append(f"no employment_type match for {employment_type!r} (looked for {keywords})")
+                    reasons.append((
+                        "employment_type",
+                        f"no employment_type match for {employment_type!r} (looked for {keywords})",
+                    ))
 
         if work_mode:
             normalized_mode = work_mode.strip().lower().replace(" ", "_")
@@ -104,7 +116,7 @@ def filter_mapped_jobs(mapped_jobs: list[dict], search_criteria: dict) -> tuple[
                 # Real structured signal (Dice) — enforce a positive match.
                 keywords = _keywords_for(work_mode, WORK_MODE_KEYWORDS)
                 if not _matches_any(text, keywords):
-                    reasons.append(f"no work_mode match for {work_mode!r} (looked for {keywords})")
+                    reasons.append(("work_mode", f"no work_mode match for {work_mode!r} (looked for {keywords})"))
             else:
                 # No structured signal (LinkedIn) — only reject on an explicit
                 # contradiction; ambiguous/unstated is kept, not dropped.
@@ -112,10 +124,13 @@ def filter_mapped_jobs(mapped_jobs: list[dict], search_criteria: dict) -> tuple[
                 if opposite:
                     opposite_keywords = _keywords_for(opposite, WORK_MODE_KEYWORDS)
                     if _matches_any(text, opposite_keywords):
-                        reasons.append(f"job text explicitly says {opposite!r}, contradicting the requested {work_mode!r}")
+                        reasons.append((
+                            "work_mode",
+                            f"job text explicitly says {opposite!r}, contradicting the requested {work_mode!r}",
+                        ))
 
         if reasons:
-            dropped.append((job, "; ".join(reasons)))
+            dropped.append((job, reasons))
         else:
             kept.append(job)
 
@@ -126,7 +141,12 @@ def filter_mapped_jobs(mapped_jobs: list[dict], search_criteria: dict) -> tuple[
             len(mapped_jobs),
             len(dropped),
         )
-        for job, reason in dropped:
-            logger.info("  filtered out %r (%s): %s", job.get("title"), job.get("company"), reason)
+        for job, reasons in dropped:
+            logger.info(
+                "  filtered out %r (%s): %s",
+                job.get("title"),
+                job.get("company"),
+                "; ".join(message for _category, message in reasons),
+            )
 
     return kept, dropped

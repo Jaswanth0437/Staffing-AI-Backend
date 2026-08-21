@@ -15,6 +15,11 @@ class SearchCriteria(BaseModel):
     work_mode: Optional[str] = None
     company: Optional[str] = None
     posting_timeframe: Optional[str] = None
+    # "linkedin" | "dice" | "both" — which Apify actor(s) campaign_service's
+    # run_campaign_search() calls. Defaults to "linkedin" so existing
+    # campaigns/callers created before this field existed keep behaving
+    # exactly as they do today.
+    job_source: Optional[str] = "linkedin"
 
 
 class CampaignCreate(BaseModel):

@@ -19,6 +19,14 @@ class Campaign(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
     last_checked_at: Optional[datetime] = None
     status: str = Field(default="pending")  # pending | running | completed | failed
+    # Outcome of the most recent search/recheck run — lets the UI explain an
+    # empty jobs list (e.g. "20 fetched, all filtered out") instead of
+    # looking identical to "nothing was ever found". Shape:
+    # {"fetched": int, "inserted": int, "filtered_out": int,
+    #  "reasons": {"employment_type": int, "work_mode": int, "company": int},
+    #  "errors": {"<source>": "<error message>"}}
+    # Optional/absent keys mean "none of that kind" — see campaign_service.py.
+    last_run_summary: Optional[dict] = Field(default=None, sa_column=Column(JSON))
 
 
 class Job(SQLModel, table=True):
