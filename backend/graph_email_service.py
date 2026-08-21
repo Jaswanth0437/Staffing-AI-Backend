@@ -8,7 +8,10 @@ The access token (~1hr TTL) is cached process-wide and only refetched once
 expired, so a burst of sends doesn't hit the token endpoint per-call.
 """
 
+import base64
+import html
 import time
+from pathlib import Path
 
 import requests
 
@@ -23,6 +26,30 @@ TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS = 60
 
 _cached_token: str | None = None
 _cached_token_expires_at: float = 0.0
+
+# Appended as an inline image below the text signature on the outreach send
+# only (not the internal CEO notification) — a plain-text email can't embed
+# an image, so this forces that one send into HTML with a CID attachment.
+SIGNATURE_IMAGE_PATH = Path(__file__).parent / "assets" / "winfomi_signature.png"
+SIGNATURE_IMAGE_CID = "winfomi-signature-logo"
+
+_cached_signature_image_b64: str | None = None
+
+
+def _get_signature_image_b64() -> str | None:
+    global _cached_signature_image_b64
+    if _cached_signature_image_b64 is None:
+        try:
+            _cached_signature_image_b64 = base64.b64encode(SIGNATURE_IMAGE_PATH.read_bytes()).decode("ascii")
+        except OSError:
+            return None
+    return _cached_signature_image_b64
+
+
+def _text_to_html(text: str) -> str:
+    """Escapes a plain-text email body for safe embedding in an HTML
+    message, preserving line breaks."""
+    return html.escape(text or "").replace("\n", "<br>")
 
 
 class GraphEmailError(Exception):
@@ -71,11 +98,16 @@ def get_access_token() -> str:
     return token
 
 
-def send_email(sender: str, recipient: str, subject: str, body: str) -> dict:
+def send_email(sender: str, recipient: str, subject: str, body: str, include_signature_image: bool = False) -> dict:
     """Sends an email via Graph's sendMail on behalf of `sender`. Raises
     GraphEmailError with the actual Graph API error detail on failure.
     Returns a small summary dict on success (Graph's sendMail returns 202
-    with an empty body on success, so there's nothing else to report)."""
+    with an empty body on success, so there's nothing else to report).
+
+    include_signature_image=True switches the message to HTML with the
+    Winfomi/Salesforce-Partner logo attached inline below the text body —
+    used for the actual outreach send, not the internal CEO notification,
+    since that one's just a plain-text FYI copy."""
     if not sender:
         raise GraphEmailError("GRAPH_SENDER_EMAIL is not configured")
     if not recipient:
@@ -83,14 +115,30 @@ def send_email(sender: str, recipient: str, subject: str, body: str) -> dict:
 
     token = get_access_token()
 
-    payload = {
-        "message": {
+    image_b64 = _get_signature_image_b64() if include_signature_image else None
+    if image_b64:
+        html_body = f'{_text_to_html(body)}<br><br><img src="cid:{SIGNATURE_IMAGE_CID}" alt="Winfomi - Salesforce CREST Partner">'
+        message = {
+            "subject": subject or "",
+            "body": {"contentType": "HTML", "content": html_body},
+            "toRecipients": [{"emailAddress": {"address": recipient}}],
+            "attachments": [{
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": "winfomi-signature.png",
+                "contentType": "image/png",
+                "contentBytes": image_b64,
+                "isInline": True,
+                "contentId": SIGNATURE_IMAGE_CID,
+            }],
+        }
+    else:
+        message = {
             "subject": subject or "",
             "body": {"contentType": "Text", "content": body or ""},
             "toRecipients": [{"emailAddress": {"address": recipient}}],
-        },
-        "saveToSentItems": True,
-    }
+        }
+
+    payload = {"message": message, "saveToSentItems": True}
 
     try:
         response = requests.post(
