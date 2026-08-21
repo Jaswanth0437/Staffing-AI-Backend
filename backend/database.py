@@ -23,6 +23,11 @@ def _add_missing_columns() -> None:
         if "is_new" not in job_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE jobs ADD COLUMN is_new BOOLEAN NOT NULL DEFAULT FALSE"))
+    if "campaigns" in inspector.get_table_names():
+        campaign_columns = {c["name"] for c in inspector.get_columns("campaigns")}
+        if "last_run_summary" not in campaign_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE campaigns ADD COLUMN last_run_summary JSON"))
 
 
 def get_session():
