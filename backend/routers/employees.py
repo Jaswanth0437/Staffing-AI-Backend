@@ -40,7 +40,8 @@ def update_employee(employee_id: int, payload: EmployeeUpdate, session: Session 
     # default) expires every object in the session including `employee` —
     # refresh it after that, not before, so the attributes FastAPI reads for
     # the response are loaded while the session is still open.
-    log_activity(session, "employee", employee_id, f"manually edited: {list(updates.keys())}")
+    edited_fields = ", ".join(field.replace("_", " ") for field in updates.keys())
+    log_activity(session, "employee", employee_id, f"Manually edited: {edited_fields}" if edited_fields else "Manually edited")
     session.refresh(employee)
     return employee
 
