@@ -112,6 +112,13 @@ def create_lead(job_id: int, session: Session = Depends(get_session)):
     session.add(contact)
     session.commit()
     session.refresh(contact)
-    log_activity(session, "lead", lead.id, f"contact resolved via {contact.source} ({contact.type})")
+    contact_tier_description = {
+        "job_poster": "the job poster",
+        "hr_contact": "an HR contact",
+        "employee_contact": "a company employee",
+        "company_level": "a company-level contact",
+    }.get(contact.type, "a contact")
+    via_apollo = " via Apollo" if contact.source == "apollo" else ""
+    log_activity(session, "lead", lead.id, f"Resolved {contact_tier_description}{via_apollo}")
 
     return CreateLeadResponse(lead_id=lead.id, status=lead.status, contact=contact)

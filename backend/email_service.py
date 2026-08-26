@@ -92,10 +92,13 @@ def _parse_ai_response(text: str) -> tuple[str, str]:
     return subject, body
 
 
-def generate_email_content(job: Job, employee: Employee) -> tuple[str, str, list[str]]:
-    """Returns (subject, body, overlapping_skills). Raises EmailGenerationError
-    on AI failure/unparseable response."""
-    overlapping_skills = extract_overlapping_skills(job, employee)
+def generate_email_content(job: Job, employee: Employee | None) -> tuple[str, str, list[str]]:
+    """Returns (subject, body, overlapping_skills). `employee` is optional —
+    with none confirmed yet, the pitch just falls back to generic capability
+    language (see _build_prompt's skills_text fallback) instead of blocking
+    generation entirely. Raises EmailGenerationError on AI failure/unparseable
+    response."""
+    overlapping_skills = extract_overlapping_skills(job, employee) if employee else []
     try:
         subject, body = _parse_ai_response(generate_text(_build_prompt(job, overlapping_skills)))
     except AIServiceError as exc:
@@ -106,10 +109,13 @@ def generate_email_content(job: Job, employee: Employee) -> tuple[str, str, list
 
 
 def generate_and_persist_email(session: Session, lead: Lead) -> Email:
-    """Resolves the lead's job + confirmed employee match, generates the
-    email content, and creates/overwrites the lead's single `emails` row
-    (draft). Raises EmailGenerationError if there's no confirmed match yet or
-    the AI call fails."""
+    """Resolves the lead's job and (if one exists) confirmed employee match,
+    generates the email content, and creates/overwrites the lead's single
+    `emails` row (draft). A confirmed match is no longer required — without
+    one, generate_email_content() just falls back to a fully generic
+    capability pitch instead of referencing specific overlapping skills, so
+    outreach isn't blocked on matching finishing first. Raises
+    EmailGenerationError only if the job is missing or the AI call fails."""
     job = session.get(Job, lead.job_id)
     if job is None:
         raise EmailGenerationError("Job for this lead not found")
@@ -117,12 +123,7 @@ def generate_and_persist_email(session: Session, lead: Lead) -> Email:
     confirmed_match = session.exec(
         select(EmployeeMatch).where(EmployeeMatch.lead_id == lead.id, EmployeeMatch.confirmed == True)  # noqa: E712
     ).first()
-    if confirmed_match is None:
-        raise EmailGenerationError("No confirmed employee match for this lead — call POST /leads/{id}/confirm-employee first")
-
-    employee = session.get(Employee, confirmed_match.employee_id)
-    if employee is None:
-        raise EmailGenerationError("Confirmed employee record not found")
+    employee = session.get(Employee, confirmed_match.employee_id) if confirmed_match else None
 
     subject, body, _overlapping_skills = generate_email_content(job, employee)
 
@@ -132,7 +133,7 @@ def generate_and_persist_email(session: Session, lead: Lead) -> Email:
     if email is None:
         email = Email(lead_id=lead.id)
 
-    email.employee_id = employee.id
+    email.employee_id = employee.id if employee else None
     email.subject = subject
     email.body = body
     email.sender = COMPANY_NAME

@@ -95,7 +95,13 @@ def match_employees(lead_id: int, session: Session = Depends(get_session)):
     for m in created:
         session.refresh(m)
 
-    log_activity(session, "lead", lead_id, f"matched {len(created)} employees" + (f" ({reason})" if reason else ""))
+    if created:
+        match_summary = f"Matched {len(created)} employee{'s' if len(created) != 1 else ''} from the bench"
+    elif reason == "no_qualifying_employees":
+        match_summary = "No employees on the bench matched this role"
+    else:
+        match_summary = "Employee matching found no results"
+    log_activity(session, "lead", lead_id, match_summary)
     return MatchEmployeesResponse(employee_matches=_matches_to_out(session, lead_id, created), reason=reason)
 
 
@@ -135,7 +141,8 @@ def confirm_employee(lead_id: int, payload: ConfirmEmployee, session: Session = 
     session.commit()
     session.refresh(match)
 
-    log_activity(session, "lead", lead_id, f"confirmed employee_match {match.id}")
+    employee = session.get(Employee, match.employee_id)
+    log_activity(session, "lead", lead_id, f"Confirmed {employee.name} as the matched employee" if employee else "Confirmed an employee match")
     return _matches_to_out(session, lead_id, [match])[0]
 
 
@@ -150,5 +157,5 @@ def generate_email(lead_id: int, session: Session = Depends(get_session)):
     except EmailGenerationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    log_activity(session, "lead", lead_id, f"generated email (id={email.id})")
+    log_activity(session, "lead", lead_id, "Generated an outreach email draft")
     return email
